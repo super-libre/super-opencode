@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Exercise the Super TTS integration end to end without launching the TUI.
+// Exercise the Super Voice speech integration end to end without launching the TUI.
 //
 //   bun run --cwd packages/tui script/speech-check.ts
 //   bun run --cwd packages/tui script/speech-check.ts "say this instead"
@@ -21,10 +21,10 @@ import {
   TtsError,
   valid,
 } from "../src/tts/client"
-import { read, write } from "../src/tts/session"
+import { read, write } from "../src/voice/session"
 import { Global } from "@opencode/util/global"
 
-const phrase = process.argv.slice(2).join(" ") || "Super TTS is wired up. This is opencode reading a reply out loud."
+const phrase = process.argv.slice(2).join(" ") || "Super Voice is wired up. This is opencode reading a reply out loud."
 
 const started = Date.now()
 const at = () => `${((Date.now() - started) / 1000).toFixed(2)}s`
@@ -35,14 +35,14 @@ const fail = (message: string, hint?: string) => {
   process.exit(1)
 }
 
-console.log("\nSuper TTS check\n")
+console.log("\nSuper Voice speech check\n")
 
 const socket = socketPath()
 if (!socket) fail("XDG_RUNTIME_DIR is not set, so the daemon socket cannot be located.")
 step(`socket   ${socket}`)
 
 if (!(await available(socket!)))
-  fail("The Super TTS daemon is not running.", "Start it with: systemctl --user start super-tts")
+  fail("The Super Voice daemon is not running.", "Start it with: systemctl --user start super-voice")
 step("daemon   listening")
 
 let session = await read(Global.Path.state)
@@ -54,7 +54,7 @@ else {
     if (error instanceof TtsError && error.code === "popup_failed")
       fail(
         "The daemon could not show its consent dialog.",
-        "It only looks for super-tts-consent beside its own binary — check that it is there.",
+        "It only looks for super-voice-consent beside its own binary — check that it is there.",
       )
     if (error instanceof TtsError && error.code.startsWith("user_")) fail(`Consent was not granted (${error.code}).`)
     fail(error instanceof Error ? error.message : String(error))

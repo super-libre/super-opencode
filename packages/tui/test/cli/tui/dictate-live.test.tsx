@@ -20,21 +20,19 @@ function daemon(socket: string) {
     async fetch(request) {
       const url = new URL(request.url)
       if (url.pathname === "/v1/auth/request")
-        return json({ status: "success", session_token: "stt_live", scopes: ["transcribe", "status"] })
+        return json({ status: "success", session_token: "stt_live", scopes: ["transcribe", "speak", "status", "audio_visualization", "playback_events"] })
       if (url.pathname === "/v1/auth/status") return json({ status: "success" })
       if (url.pathname === "/v1/status")
         return json({
           status: "success",
-          device: "cpu",
-          model_loaded: true,
-          current_model: "whisper-tiny",
-          busy: false,
+          stt: { device: "cpu", model_loaded: true, current_model: "whisper-tiny", busy: false },
+          tts: { device: "unknown", model_loaded: false, busy: false },
         })
-      if (url.pathname === "/v1/transcribe/stop") {
+      if (url.pathname === "/v1/stt/transcribe/stop") {
         stopped = true
         return json({ status: "success", message: "Recording stop signal sent" })
       }
-      if (url.pathname === "/v1/transcribe") {
+      if (url.pathname === "/v1/stt/transcribe") {
         stopped = false
         return new Response(
           new ReadableStream({
@@ -58,7 +56,7 @@ function daemon(socket: string) {
 
 test("streams live preview text into the prompt footer, then inserts the final transcript", async () => {
   const socket = path.join(systmp(), `opencode-dictate-live-${process.pid}.sock`)
-  process.env.SUPER_STT_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const server = daemon(socket)
   await using state = await tmpdir()
 

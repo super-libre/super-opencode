@@ -13,10 +13,11 @@ import {
   stream,
   TtsError,
   valid,
+  SCOPES,
 } from "../src/tts/client"
 
-// A stand-in for the Super TTS daemon covering the slice of the /v1 protocol
-// opencode uses. See super-tts/docs/protocol/ for the wire reference.
+// A stand-in for the Super Voice daemon covering the slice of the /v1 protocol
+// speech uses. See super-stt/docs/protocol/ for the wire reference.
 type Frames = { started?: Record<string, unknown>; deltas: string[]; ended: boolean; cancelled: boolean }
 
 const seen: Frames = { deltas: [], ended: false, cancelled: false }
@@ -80,16 +81,20 @@ function daemon(socket: string, options: { busySessions?: boolean } = {}) {
         return new Response(body, { headers: { "Content-Type": "text/event-stream" } })
       }
       if (url.pathname === "/v1/status")
-        return json({ status: "success", device: "cpu", model_loaded: true, current_model: "kokoro-82m", busy: false })
-      if (url.pathname === "/v1/speak") {
+        return json({
+          status: "success",
+          stt: { device: "unknown", model_loaded: false, busy: false },
+          tts: { device: "cpu", model_loaded: true, current_model: "kokoro-82m", busy: false },
+        })
+      if (url.pathname === "/v1/tts/speak") {
         spoken.push(((await request.json()) as { text: string }).text)
         return json({ status: "success", utterance_id: "utt_1" }, 202)
       }
-      if (url.pathname === "/v1/speak/stop") {
+      if (url.pathname === "/v1/tts/speak/stop") {
         stopped++
         return json({ status: "success" })
       }
-      if (url.pathname === "/v1/speak/stream") {
+      if (url.pathname === "/v1/tts/speak/stream") {
         if (options.busySessions)
           return json({ status: "error", error_code: "speak_sessions_busy", message: "busy" }, 503)
         if (instance.upgrade(request, { data: { id: "utt_stream" } })) return
@@ -139,17 +144,23 @@ test("resolves the socket path and detects the daemon", async () => {
   expect(await available(socket)).toBe(true)
   expect(await available(path.join(tmpdir(), "opencode-tts-absent.sock"))).toBe(false)
   expect(socketPath()).toBe(
-    process.env.SUPER_TTS_HTTP_SOCKET ??
-      (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, "tts", "super-tts-http.sock") : undefined)!,
+    process.env.SUPER_VOICE_HTTP_SOCKET ??
+      (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, "voice", "super-voice-http.sock") : undefined)!,
   )
 })
 
 test("mints a token and reads status", async () => {
   const session = await authorize(socket, "1.2.3")
   expect(session.token).toStartWith("tts_")
-  expect(session.scopes).toEqual(["speak", "status", "playback_events"])
+  // One token for both features, so it asks for dictation's scopes too.
+  expect(session.scopes).toEqual(SCOPES)
+  expect(session.scopes).toContain("speak")
+  expect(session.scopes).toContain("transcribe")
   expect(await valid(socket, session.token)).toBe(true)
-  expect((await status(socket, session.token)).model_loaded).toBe(true)
+  // Text to speech's part of the daemon's status, not speech to text's.
+  const current = await status(socket, session.token)
+  expect(current.model_loaded).toBe(true)
+  expect(current.current_model).toBe("kokoro-82m")
 })
 
 test("speaks complete text and stops on request", async () => {

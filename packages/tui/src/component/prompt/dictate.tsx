@@ -18,7 +18,7 @@ import {
   transcribe,
   valid,
 } from "../../stt/client"
-import { read, write } from "../../stt/session"
+import { read, write } from "../../voice/session"
 import type { Session } from "../../stt/client"
 
 export type DictationState = "idle" | "starting" | "recording" | "transcribing"
@@ -208,7 +208,7 @@ export function DictateButton(props: { dictation: Dictation; disabled?: boolean 
 }
 
 /**
- * Dictation through the Super STT daemon. The daemon owns the microphone and
+ * Dictation through the Super Voice daemon. The daemon owns the microphone and
  * the model — opencode asks it to capture, streams back preview text while the
  * user speaks, and inserts the final transcription into the prompt.
  */
@@ -360,7 +360,7 @@ export function usePromptDictation(input: {
     session = await authorize(socket, app.version)
     await write(paths.state, session).catch((error) => {
       // A token we cannot persist still works for this run.
-      console.debug("failed to persist super-stt session", { error })
+      console.debug("failed to persist super-voice session", { error })
     })
     return session
   }
@@ -411,7 +411,7 @@ export function usePromptDictation(input: {
 
   async function start() {
     if (!socket) {
-      notify("Super STT is unavailable: XDG_RUNTIME_DIR is not set.")
+      notify("Super Voice is unavailable: XDG_RUNTIME_DIR is not set.")
       return
     }
     // Claim the state before the first await so a double press cannot open two
@@ -421,7 +421,7 @@ export function usePromptDictation(input: {
 
     if (!(await available(socket))) {
       setState("idle")
-      notify("The Super STT daemon is not running. Start it with: systemctl --user start super-stt")
+      notify("The Super Voice daemon is not running. Start it with: systemctl --user start super-voice")
       setReady(false)
       setReachable(false)
       return
@@ -444,7 +444,7 @@ export function usePromptDictation(input: {
     }
     if (current?.busy) {
       setState("idle")
-      notify("Super STT is already recording for another app.")
+      notify("Super Voice is already recording for another app.")
       return
     }
 
@@ -508,11 +508,11 @@ export function usePromptDictation(input: {
     if (!(error instanceof SttError)) return false
     const denied = error.code === "user_denied" || error.code === "user_denied_cached"
     if (!denied && error.code !== "popup_failed" && error.code !== "user_dismissed") return false
-    if (denied) notify("Super STT access was denied. Approve opencode in the consent dialog to use the microphone.")
+    if (denied) notify("Super Voice access was denied. Approve opencode in the consent dialog to use the microphone.")
     // The daemon only looks for its consent helper next to its own binary, so
     // this is what a daemon run straight out of a build tree reports.
     if (error.code === "popup_failed")
-      notify("Super STT could not show its consent dialog. Check that super-stt-consent sits beside the daemon.")
+      notify("Super Voice could not show its consent dialog. Check that super-voice-consent sits beside the daemon.")
     input.refused?.()
     return true
   }

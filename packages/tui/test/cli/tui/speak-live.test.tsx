@@ -74,7 +74,7 @@ function daemon(socket: string, seen: Seen, queueing = 0) {
         return json({
           status: "success",
           session_token: "tts_live",
-          scopes: ["speak", "status", "playback_events"],
+          scopes: ["transcribe", "speak", "status", "audio_visualization", "playback_events"],
           expires_at: "2099-01-01T00:00:00Z",
         })
       }
@@ -85,12 +85,10 @@ function daemon(socket: string, seen: Seen, queueing = 0) {
       if (url.pathname === "/v1/status")
         return json({
           status: "success",
-          device: "cpu",
-          model_loaded: true,
-          current_model: "kokoro-82m",
-          busy: seen.busy,
+          stt: { device: "unknown", model_loaded: false, busy: false },
+          tts: { device: "cpu", model_loaded: true, current_model: "kokoro-82m", busy: seen.busy },
         })
-      if (url.pathname === "/v1/speak/stop") {
+      if (url.pathname === "/v1/tts/speak/stop") {
         // A token the daemon has revoked, because the binary it was minted for
         // changed on disk while opencode was running.
         if (seen.revoked)
@@ -101,7 +99,7 @@ function daemon(socket: string, seen: Seen, queueing = 0) {
         if (spoke) publish({ is_speaking: false, utterance_id: "utt_replay" })
         return json({ status: "success", ...(spoke ? { utterance_id: "utt_replay" } : {}) })
       }
-      if (url.pathname === "/v1/speak") {
+      if (url.pathname === "/v1/tts/speak") {
         seen.spoken.push(((await request.json()) as { text?: string }).text ?? "")
         seen.busy = true
         // The utterance is announced as it starts, long before the request is
@@ -124,7 +122,7 @@ function daemon(socket: string, seen: Seen, queueing = 0) {
         })
         return new Response(body, { headers: { "Content-Type": "text/event-stream" } })
       }
-      if (url.pathname === "/v1/speak/stream") {
+      if (url.pathname === "/v1/tts/speak/stream") {
         if (instance.upgrade(request, { data: { id: "utt_1" } })) return
         return json({ status: "error", message: "expected upgrade" }, 400)
       }
@@ -239,7 +237,7 @@ function reply(events: { emit: (event: OpenCodeEvent) => void }, message: string
 
 test("asks for consent as soon as speech is enabled, then streams the reply", async () => {
   const socket = path.join(systmp(), `opencode-speak-live-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
 
@@ -297,7 +295,7 @@ test("asks for consent as soon as speech is enabled, then streams the reply", as
 
 test("plays a written reply, without speech ever having been switched on", async () => {
   const socket = path.join(systmp(), `opencode-speak-play-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   listeners.clear()
   const server = daemon(socket, seen)
@@ -335,7 +333,7 @@ test("plays a written reply, without speech ever having been switched on", async
 
 test("stops the reply it is playing when asked a second time", async () => {
   const socket = path.join(systmp(), `opencode-speak-stop-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   listeners.clear()
   const server = daemon(socket, seen)
@@ -365,7 +363,7 @@ test("stops the reply it is playing when asked a second time", async () => {
 
 test("stops a reply the daemon is still queueing, rather than starting it over", async () => {
   const socket = path.join(systmp(), `opencode-speak-slow-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   listeners.clear()
   const server = daemon(socket, seen, 400)
@@ -398,7 +396,7 @@ test("stops a reply the daemon is still queueing, rather than starting it over",
 
 test("stops a reply the indicator has lost track of", async () => {
   const socket = path.join(systmp(), `opencode-speak-stale-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   listeners.clear()
   const server = daemon(socket, seen)
@@ -432,7 +430,7 @@ test("stops a reply the indicator has lost track of", async () => {
 // wait for the answer rather than firing the request and dying.
 test("quitting stops the voice, and waits for the daemon to say so", async () => {
   const socket = path.join(systmp(), `opencode-speak-hush-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
   const { app, speech, hushVoice } = await mount()
@@ -455,7 +453,7 @@ test("quitting stops the voice, and waits for the daemon to say so", async () =>
 
 test("quitting without ever having spoken does not wait on the daemon", async () => {
   const socket = path.join(systmp(), `opencode-speak-quiet-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
   const { app, hushVoice } = await mount()
@@ -478,7 +476,7 @@ test("quitting without ever having spoken does not wait on the daemon", async ()
 // just cut off — which is why the microphone appeared to do nothing.
 test("a reply silenced mid-sentence is not picked up again by the next delta", async () => {
   const socket = path.join(systmp(), `opencode-speak-abandon-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
   const { app, events, speech } = await mount()
@@ -524,7 +522,7 @@ test("a reply silenced mid-sentence is not picked up again by the next delta", a
 // still talking, and nothing on screen would explain why.
 test("a stop refused by a revoked token mints a new one and stops anyway", async () => {
   const socket = path.join(systmp(), `opencode-speak-revoked-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
   const { app, speech, hushVoice } = await mount()
@@ -550,7 +548,7 @@ test("a stop refused by a revoked token mints a new one and stops anyway", async
 
 test("a daemon that goes away is said, not the end of interactive mode, and is picked up again", async () => {
   const socket = path.join(systmp(), `opencode-speak-gone-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   let server = daemon(socket, seen)
   const { app, events, speech, toast } = await mount()
@@ -584,7 +582,7 @@ test("a daemon that goes away is said, not the end of interactive mode, and is p
 
 test("switched on with no daemon, interactive mode stays on and says so", async () => {
   const socket = path.join(systmp(), `opencode-speak-absent-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   await rm(socket, { force: true })
   const { app, speech, toast } = await mount()
 
@@ -604,7 +602,7 @@ test("switched on with no daemon, interactive mode stays on and says so", async 
 
 test("a restart that finds interactive mode on asks for consent straight away", async () => {
   const socket = path.join(systmp(), `opencode-speak-restored-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false }
   const server = daemon(socket, seen)
   // Remembered from last time: on, and nobody has switched anything.
@@ -622,7 +620,7 @@ test("a restart that finds interactive mode on asks for consent straight away", 
 
 test("one consent dialog, however many ask while it is up", async () => {
   const socket = path.join(systmp(), `opencode-speak-once-${process.pid}.sock`)
-  process.env.SUPER_TTS_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const seen: Seen = { auth: 0, started: 0, deltas: [], ended: 0, spoken: [], stopped: 0, busy: false, consent: 300 }
   const server = daemon(socket, seen)
   const { app, events, speech } = await mount()

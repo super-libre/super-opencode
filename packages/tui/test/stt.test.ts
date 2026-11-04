@@ -4,8 +4,8 @@ import path from "path"
 import { rm, stat } from "fs/promises"
 import { authorize, available, socketPath, status, stop, transcribe, valid, SttError, SCOPES } from "../src/stt/client"
 
-// A stand-in for the Super STT daemon covering the slice of the /v1 protocol
-// the prompt uses. See super-stt/docs/protocol/ for the wire reference.
+// A stand-in for the Super Voice daemon covering the slice of the /v1 protocol
+// dictation uses. See super-stt/docs/protocol/ for the wire reference.
 function daemon(socket: string, options: { rejectFirstToken?: boolean } = {}) {
   const tokens = new Set<string>()
   let issued = 0
@@ -46,18 +46,16 @@ function daemon(socket: string, options: { rejectFirstToken?: boolean } = {}) {
       if (url.pathname === "/v1/status")
         return json({
           status: "success",
-          device: "cuda",
-          model_loaded: true,
-          current_model: "whisper-tiny",
-          busy: false,
+          stt: { device: "cuda", model_loaded: true, current_model: "whisper-tiny", busy: false },
+          tts: { device: "unknown", model_loaded: false, busy: false },
         })
 
-      if (url.pathname === "/v1/transcribe/stop") {
+      if (url.pathname === "/v1/stt/transcribe/stop") {
         stopped = true
         return json({ status: "success", message: "Recording stop signal sent" })
       }
 
-      if (url.pathname === "/v1/transcribe") {
+      if (url.pathname === "/v1/stt/transcribe") {
         stopped = false
         return new Response(
           new ReadableStream({
@@ -98,8 +96,8 @@ test("detects a listening daemon and ignores a missing one", async () => {
 
 test("resolves the socket path from the environment", () => {
   expect(socketPath()).toBe(
-    process.env.SUPER_STT_HTTP_SOCKET ??
-      (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, "stt", "super-stt-http.sock") : undefined)!,
+    process.env.SUPER_VOICE_HTTP_SOCKET ??
+      (process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, "voice", "super-voice-http.sock") : undefined)!,
   )
 })
 
@@ -115,8 +113,10 @@ test("mints and validates a session token", async () => {
 
 test("reads daemon status", async () => {
   const session = await authorize(socket, "1.2.3")
+  // Speech to text's part of the daemon's status, not text to speech's.
   const result = await status(socket, session.token)
   expect(result.model_loaded).toBe(true)
+  expect(result.current_model).toBe("whisper-tiny")
   expect(result.busy).toBe(false)
 })
 

@@ -1,26 +1,16 @@
-import path from "path"
+import * as Daemon from "../voice/daemon"
 
-// Client for the Super STT daemon protocol: HTTP/1.1 + JSON over a Unix domain
-// socket, with Server-Sent Events for streaming transcriptions. Every route is
-// served under the /v1 prefix.
-// See ../../../../../super-stt/docs/protocol/ for the wire reference.
+// Client for Super Voice's speech-to-text feature: its routes are under
+// /v1/stt, with Server-Sent Events for streaming transcriptions. The transport,
+// the token and the routes the daemon has once are ../voice/daemon's.
 
-export const SCOPES = ["transcribe", "status", "audio_visualization"]
-
-export const APP_NAME = "opencode"
-
-const PREFIX = "/v1"
+export { APP_NAME, SCOPES, available, satisfies, socketPath, valid } from "../voice/daemon"
+export type { Session } from "../voice/daemon"
 
 /** The shortest gap between two spectrum frames handed to a caller. */
 const SPECTRUM_MIN_INTERVAL_MS = 40
 
 export type StopMode = "silence_only" | "silence_and_manual" | "manual_only"
-
-export type Session = {
-  token: string
-  scopes: string[]
-  expires?: string
-}
 
 export type Preview = {
   text: string
@@ -35,12 +25,8 @@ export type Spectrum = {
   energy: number
 }
 
-export type Status = {
-  device: string
-  model_loaded: boolean
-  current_model?: string
-  busy: boolean
-}
+/** Speech to text's part of `GET /v1/status`. */
+export type Status = Daemon.FeatureStatus
 
 export class SttError extends Error {
   readonly code: string
@@ -53,65 +39,15 @@ export class SttError extends Error {
   }
 }
 
-export function socketPath() {
-  if (process.env.SUPER_STT_HTTP_SOCKET) return process.env.SUPER_STT_HTTP_SOCKET
-  if (!process.env.XDG_RUNTIME_DIR) return undefined
-  return path.join(process.env.XDG_RUNTIME_DIR, "stt", "super-stt-http.sock")
-}
+const make: Daemon.MakeError = (message, code, status) => new SttError(message, code, status)
 
-/**
- * Whether the daemon is taking connections. The socket file is no answer: a
- * daemon that crashed leaves it behind. Connects and hangs up without a
- * request, because every request counts toward the daemon's per-client quota
- * and interactive mode asks this every few seconds.
- */
-export async function available(socket: string) {
-  return Bun.connect({ unix: socket, socket: { data() {} } }).then(
-    (connection) => {
-      connection.end()
-      return true
-    },
-    () => false,
-  )
-}
-
-function url(endpoint: string) {
-  return `http://stt.local${PREFIX}${endpoint}`
-}
-
-async function fail(response: Response) {
-  // Error envelope: { status, error_code?, message, data? }. error_code is the
-  // stable identifier; message carries the auth identifiers verbatim on older
-  // daemons, so fall back to it before the bare status.
-  const body = (await response.json().catch(() => undefined)) as
-    | { error_code?: string; message?: string; data?: { reason?: string } }
-    | undefined
-  const code = body?.error_code ?? body?.message ?? `http_${response.status}`
-  const reason = body?.data?.reason
-  return new SttError(body?.message ?? `request failed (${response.status})`, reason ?? code, response.status)
-}
-
-async function send(
+function send(
   socket: string,
   method: string,
   endpoint: string,
   options?: { token?: string; body?: unknown; accept?: string; signal?: AbortSignal },
 ) {
-  const response = await fetch(url(endpoint), {
-    unix: socket,
-    method,
-    signal: options?.signal,
-    headers: {
-      ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
-      ...(options?.body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(options?.accept ? { Accept: options.accept } : {}),
-    },
-    body: options?.body === undefined ? undefined : JSON.stringify(options.body),
-  }).catch((error) => {
-    throw new SttError(`cannot reach the Super STT daemon: ${error.message}`, "daemon_unreachable", 0)
-  })
-  if (!response.ok) throw await fail(response)
-  return response
+  return Daemon.send(socket, method, endpoint, make, options)
 }
 
 /**
@@ -119,35 +55,13 @@ async function send(
  * token to the calling binary, so a token minted here stops working if the
  * opencode executable changes (`exe_changed`).
  */
-export async function authorize(socket: string, version: string): Promise<Session> {
-  const response = await send(socket, "POST", "/auth/request", {
-    body: { app_name: APP_NAME, scopes: SCOPES, version },
-  })
-  const body = (await response.json()) as { session_token: string; scopes?: string[]; expires_at?: string }
-  return { token: body.session_token, scopes: body.scopes ?? SCOPES, expires: body.expires_at }
+export function authorize(socket: string, version: string) {
+  return Daemon.authorize(socket, version, make)
 }
 
-/** Probe token validity without spawning a consent popup. */
-/**
- * Whether a stored session still covers what this build asks for. A token minted
- * by an older build carries the scopes of its day, and a topic added since would
- * be refused with `scope_denied` rather than anything the user could act on.
- */
-export function satisfies(session: Session) {
-  return SCOPES.every((scope) => session.scopes.includes(scope))
-}
-
-export async function valid(socket: string, token: string) {
-  const response = await fetch(url("/auth/status"), {
-    unix: socket,
-    headers: { Authorization: `Bearer ${token}` },
-  }).catch(() => undefined)
-  return response?.ok === true
-}
-
-export async function status(socket: string, token: string) {
-  const response = await send(socket, "GET", "/status", { token })
-  return (await response.json()) as Status
+/** Speech to text's model and device, and whether a capture is under way. */
+export async function status(socket: string, token: string): Promise<Status> {
+  return (await Daemon.status(socket, token, make)).stt
 }
 
 /**
@@ -156,7 +70,7 @@ export async function status(socket: string, token: string) {
  * rather than closing that connection — a disconnect drops undelivered output.
  */
 export async function stop(socket: string, token: string) {
-  await send(socket, "POST", "/transcribe/stop", { token })
+  await send(socket, "POST", "/stt/transcribe/stop", { token })
 }
 
 /**
@@ -182,7 +96,7 @@ export async function transcribe(
     onCapture?: () => void
   },
 ) {
-  const response = await send(socket, "POST", "/transcribe", {
+  const response = await send(socket, "POST", "/stt/transcribe", {
     token,
     accept: "text/event-stream",
     signal: options.signal,
@@ -200,7 +114,7 @@ export async function transcribe(
   options.onCapture?.()
 
   let transcription = ""
-  for await (const frame of frames(response.body, options.signal)) {
+  for await (const frame of Daemon.frames(response.body, options.signal)) {
     if (frame.event === "preview") {
       const data = parse(frame.data) as Preview | undefined
       if (data?.text !== undefined) options.onPreview?.(data)
@@ -237,7 +151,7 @@ export async function* spectrum(socket: string, token: string, signal?: AbortSig
   })
   if (!response.body) return
 
-  for await (const frame of frames(response.body, signal)) {
+  for await (const frame of Daemon.frames(response.body, signal)) {
     if (frame.event !== "frequency_bands") continue
     // The daemon publishes one of these per audio callback — far faster than a
     // terminal can draw, and parsing every one is work that shows up as jank
@@ -267,40 +181,4 @@ function decodeBands(encoded: string) {
 function parse(data: string) {
   if (!data) return undefined
   return JSON.parse(data) as unknown
-}
-
-/**
- * Minimal SSE reader: yields one frame per blank-line-delimited block and drops
- * the comment frames (`: stream-open`, `: keepalive`) the daemon writes to hold
- * the connection open through silent phases.
- */
-async function* frames(body: ReadableStream<Uint8Array>, signal?: AbortSignal) {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  const release = () => reader.cancel().catch(() => undefined)
-  signal?.addEventListener("abort", release, { once: true })
-
-  let buffer = ""
-  while (true) {
-    const chunk = await reader.read().catch(() => undefined)
-    if (!chunk || chunk.done) break
-    buffer += decoder.decode(chunk.value, { stream: true })
-    while (true) {
-      const boundary = /\r?\n\r?\n/.exec(buffer)
-      if (!boundary) break
-      const block = buffer.slice(0, boundary.index)
-      buffer = buffer.slice(boundary.index + boundary[0].length)
-      const frame = block.split(/\r?\n/).reduce(
-        (acc, line) => {
-          if (line.startsWith(":")) return acc
-          if (line.startsWith("event:")) return { ...acc, event: line.slice(6).trim() }
-          if (line.startsWith("data:")) return { ...acc, data: acc.data + line.slice(5).trim() }
-          return acc
-        },
-        { event: "", data: "" },
-      )
-      if (frame.event) yield frame
-    }
-  }
-  signal?.removeEventListener("abort", release)
 }

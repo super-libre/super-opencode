@@ -40,7 +40,7 @@ function server(socket: string, options: { reject?: boolean; onOpen?: (ws: any) 
 async function connect(socket: string, received: string[], onClose?: () => void) {
   return open({
     unix: socket,
-    endpoint: "/v1/speak/stream",
+    endpoint: "/v1/tts/speak/stream",
     host: "tts.local",
     headers: { Authorization: "Bearer tts_test" },
     handlers: { onMessage: (text) => received.push(text), onClose },

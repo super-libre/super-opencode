@@ -40,17 +40,21 @@ function daemon(
             { status: "error", error_code: "auth_denied", message: "auth_denied", data: { reason: "user_denied" } },
             403,
           )
-        return json({ status: "success", session_token: "stt_hold", scopes: ["transcribe", "status"] })
+        return json({ status: "success", session_token: "stt_hold", scopes: ["transcribe", "speak", "status", "audio_visualization", "playback_events"] })
       }
       if (url.pathname === "/v1/auth/status") return json({ status: "success" })
       if (url.pathname === "/v1/status")
-        return json({ status: "success", device: "cpu", model_loaded: true, current_model: "tiny", busy: false })
-      if (url.pathname === "/v1/transcribe/stop") {
+        return json({
+          status: "success",
+          stt: { device: "cpu", model_loaded: true, current_model: "tiny", busy: false },
+          tts: { device: "unknown", model_loaded: false, busy: false },
+        })
+      if (url.pathname === "/v1/stt/transcribe/stop") {
         seen.stops++
         stopped = true
         return json({ status: "success" })
       }
-      if (url.pathname === "/v1/transcribe") {
+      if (url.pathname === "/v1/stt/transcribe") {
         seen.captures++
         stopped = false
         // Claiming the device and loading a model takes time, and the client
@@ -91,7 +95,7 @@ async function mount(
   extra: { monitor?: () => boolean; consent?: { wait?: number; deny?: boolean } } = {},
 ) {
   const socket = path.join(systmp(), `opencode-dictate-hold-${process.pid}-${Math.random().toString(36).slice(2)}.sock`)
-  process.env.SUPER_STT_HTTP_SOCKET = socket
+  process.env.SUPER_VOICE_HTTP_SOCKET = socket
   const { server, seen } = daemon(socket, warmup, transcript, extra.consent)
   // A state directory of its own, which is where the token is kept: every
   // mount meets the daemon for the first time.

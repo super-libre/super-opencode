@@ -1,13 +1,16 @@
 import path from "path"
 import { rename, rm, writeFile } from "fs/promises"
-import type { Session } from "./client"
+import type { Session } from "./daemon"
 
-// The Super TTS session token: a 0600 file in the TUI's state directory, beside
-// the prompt history. Taken from the caller rather than resolved here, so a
-// test pointed at a scratch directory cannot write over a real token. Kept out
-// of auth.json because each `type: "api"` record there is merged in as an LLM
-// provider.
-const NAME = "super-tts.json"
+// The Super Voice session token: a 0600 file in the TUI's state directory,
+// beside the prompt history. One token serves dictation and speech both. Taken
+// from the caller rather than resolved here, so a test pointed at a scratch
+// directory cannot write over a real token.
+//
+// It is deliberately not an entry in auth.json, because every `type: "api"`
+// record there is merged in as an LLM provider (see provider.ts loadAuth),
+// which would surface a phantom provider in the model list.
+const NAME = "super-voice.json"
 
 const MODE = 0o600
 

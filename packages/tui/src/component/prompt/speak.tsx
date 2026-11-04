@@ -30,7 +30,7 @@ import {
   TtsError,
   valid,
 } from "../../tts/client"
-import { read, write } from "../../tts/session"
+import { read, write } from "../../voice/session"
 import type { Session, Speaking, Stream } from "../../tts/client"
 import type { SessionMessageAssistant } from "@opencode/client"
 import { DAEMON_CHECK_MS } from "./dictate"
@@ -164,7 +164,7 @@ export function PlayButton(props: { speech: Speech; text: string; source: string
 }
 
 /**
- * Reads the agent's replies aloud through the Super TTS daemon. Assistant text
+ * Reads the agent's replies aloud through the Super Voice daemon. Assistant text
  * is forwarded as it streams, over one WebSocket session per message, so the
  * daemon speaks each sentence as it completes rather than waiting for the whole
  * reply. Markup is the daemon's problem: its normalizer drops code blocks and
@@ -316,7 +316,7 @@ function createSpeech() {
     }
     session = await authorize(socket, app.version)
     await write(paths.state, session).catch((error) => {
-      console.debug("failed to persist super-tts session", { error })
+      console.debug("failed to persist super-voice session", { error })
     })
     return session
   }
@@ -334,9 +334,9 @@ function createSpeech() {
       }
       setInteractive(false)
       if (error instanceof TtsError && (error.code === "user_denied" || error.code === "user_denied_cached"))
-        notify("Super TTS access was denied. Approve opencode in the consent dialog to hear replies.")
+        notify("Super Voice access was denied. Approve opencode in the consent dialog to hear replies.")
       else if (error instanceof TtsError && error.code === "popup_failed")
-        notify("Super TTS could not show its consent dialog. Check that super-tts-consent sits beside the daemon.")
+        notify("Super Voice could not show its consent dialog. Check that super-voice-consent sits beside the daemon.")
       else if (!(error instanceof TtsError && error.code === "user_dismissed")) notify(errorMessage(error))
       return undefined
     })
@@ -359,7 +359,7 @@ function createSpeech() {
     try {
       for await (const frame of watchSpeaking(socket!, token, controller.signal)) observe(frame)
     } catch (error) {
-      console.debug("super-tts speaking_state subscription ended", { error })
+      console.debug("super-voice speaking_state subscription ended", { error })
     } finally {
       if (watcher === controller) {
         watcher = undefined
@@ -549,7 +549,7 @@ function createSpeech() {
       // Everything else here is local: the indicator is already off, so a
       // stop that did not reach the daemon leaves the voice going with
       // nothing on screen to explain it.
-      notify("Super TTS did not accept the stop. The voice may still be speaking.")
+      notify("Super Voice did not accept the stop. The voice may still be speaking.")
     })
   }
 
@@ -656,7 +656,7 @@ function createSpeech() {
     if (!opened) return
 
     setSpeaking(true)
-    for (const delta of ["Super TTS is connec", "ted. This is opencode ", "reading a reply out loud."]) {
+    for (const delta of ["Super Voice is conn", "ected. This is opencode ", "reading a reply out loud."]) {
       opened.text(delta)
       await Bun.sleep(80)
     }
